@@ -171,7 +171,7 @@ def main():
         lambda x: "✅ DRAFTED" if x in st.session_state.drafted_players else "⭕ Available"
     ))
     
-    # Add CSS for better table styling and color coding
+    # Add CSS for better table styling, color coding, and frozen columns
     st.markdown("""
     <style>
     /* Ensure horizontal scrolling works properly */
@@ -189,6 +189,32 @@ def main():
     .dataframe {
         font-size: 12px !important;
     }
+    
+    /* Freeze first 7 columns */
+    .dataframe thead th:nth-child(-n+7) {
+        position: sticky !important;
+        left: 0 !important;
+        z-index: 10 !important;
+        background-color: #f0f2f6 !important;
+        border-right: 2px solid #ddd !important;
+    }
+    
+    .dataframe tbody td:nth-child(-n+7) {
+        position: sticky !important;
+        left: 0 !important;
+        z-index: 5 !important;
+        background-color: inherit !important;
+        border-right: 2px solid #ddd !important;
+    }
+    
+    /* Specific positioning for each frozen column */
+    .dataframe thead th:nth-child(1), .dataframe tbody td:nth-child(1) { left: 0px !important; min-width: 120px !important; }
+    .dataframe thead th:nth-child(2), .dataframe tbody td:nth-child(2) { left: 120px !important; min-width: 180px !important; }
+    .dataframe thead th:nth-child(3), .dataframe tbody td:nth-child(3) { left: 300px !important; min-width: 140px !important; }
+    .dataframe thead th:nth-child(4), .dataframe tbody td:nth-child(4) { left: 440px !important; min-width: 60px !important; }
+    .dataframe thead th:nth-child(5), .dataframe tbody td:nth-child(5) { left: 500px !important; min-width: 80px !important; }
+    .dataframe thead th:nth-child(6), .dataframe tbody td:nth-child(6) { left: 580px !important; min-width: 80px !important; }
+    .dataframe thead th:nth-child(7), .dataframe tbody td:nth-child(7) { left: 660px !important; min-width: 90px !important; }
     
     /* Color coding for drafted players */
     .dataframe tbody tr:has(td:first-child:contains("✅ DRAFTED")) {
@@ -213,6 +239,15 @@ def main():
         font-weight: bold !important;
     }
     
+    /* Ensure frozen columns maintain background colors for drafted players */
+    .dataframe tbody tr:has(td:first-child:contains("✅ DRAFTED")) td:nth-child(-n+7) {
+        background-color: #ffebee !important;
+    }
+    
+    .dataframe tbody tr:has(td:first-child:contains("⭕ Available")) td:nth-child(-n+7) {
+        background-color: #e8f5e8 !important;
+    }
+    
     /* Ensure scrollbars are visible */
     div[data-testid="stDataFrame"]::-webkit-scrollbar {
         height: 12px;
@@ -226,6 +261,11 @@ def main():
     
     div[data-testid="stDataFrame"]::-webkit-scrollbar-thumb:hover {
         background-color: #555;
+    }
+    
+    /* Add shadow to frozen columns for better visual separation */
+    .dataframe thead th:nth-child(7), .dataframe tbody td:nth-child(7) {
+        box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
     }
     </style>
     """, unsafe_allow_html=True)
