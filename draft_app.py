@@ -109,15 +109,7 @@ def main():
         'Overall Rank': 'overallRank',
         'Fantasy Points': 'fantasy',
         'Position Rank': 'positionRank',
-        'Player Name': 'player',
-        'Passing Yards': 'passingYards',
-        'Passing TDs': 'passingTouchdowns',
-        'Rushing Yards': 'rushingYards',
-        'Rushing TDs': 'rushingTouchdowns',
-        'Receiving Yards': 'receivingYards',
-        'Receiving TDs': 'receivingTouchdowns',
-        'Receptions': 'receptions',
-        'Targets': 'targets'
+        'Player Name': 'player'
     }
     sort_by = st.sidebar.selectbox("Sort by", list(sort_options.keys()))
     ascending = st.sidebar.checkbox("Ascending order", value=True)
@@ -166,106 +158,106 @@ def main():
         st.warning("No players match the current filters.")
         return
     
-    # Create display dataframe
-    display_df = filtered_df.copy()
-    
-    # Column headers (display at top)
-    st.subheader("Player Statistics")
-    
-    # Define headers and corresponding column widths
-    headers = ["Draft", "Player", "Team", "Pos", "OR", "PR", "Fant", "Comp/Att", "PaYd", "PaTD", "INT", "RuAtt", "RuYd", "RuTD", "Rec", "Tgt", "ReYd", "ReTD", "XPA", "XPM", "FGA", "FGM", "FG0-19", "FG20-29", "FG30-39", "FG40-49", "FG50+"]
-    col_widths = [0.6, 1.5, 1.2, 0.6] + [0.7] * (len(headers) - 4)  # First 4 cols have custom widths, rest are uniform
-    
-    header_cols = st.columns(col_widths)
-    
-    for i, header in enumerate(headers):
-        with header_cols[i]:
-            st.markdown(f"**{header}**")
+    # Column headers at the top
+    col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([0.8, 2, 1.5, 0.8, 1, 1, 1, 1, 1])
+    with col1:
+        st.markdown("**Draft**")
+    with col2:
+        st.markdown("**Player**")
+    with col3:
+        st.markdown("**Team**")
+    with col4:
+        st.markdown("**Pos**")
+    with col5:
+        st.markdown("**Overall**")
+    with col6:
+        st.markdown("**Pos Rank**")
+    with col7:
+        st.markdown("**Fantasy**")
+    with col8:
+        st.markdown("**Yards**")
+    with col9:
+        st.markdown("**TDs**")
     
     st.markdown("---")
     
-    # Player rows with buttons and data
+    # Create display dataframe
+    display_df = filtered_df.copy()
+    
+    # Quick draft buttons and player table
     for idx, row in display_df.iterrows():
-        # Create a unique container for each row
-        row_container = st.container()
+        col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([0.8, 2, 1.5, 0.8, 1, 1, 1, 1, 1])
         
-        with row_container:
-            # Create columns for the draft button (separate from the data row)
-            button_col, data_col = st.columns([0.1, 0.9])
-            
-            with button_col:
-                # Draft button
-                if row['player'] in st.session_state.drafted_players:
-                    if st.button("✅", key=f"undraft_{idx}", help="Click to undraft"):
-                        st.session_state.drafted_players.discard(row['player'])
-                        st.rerun()
+        with col1:
+            # Draft button
+            if row['player'] in st.session_state.drafted_players:
+                if st.button("✅", key=f"undraft_{idx}", help="Click to undraft"):
+                    st.session_state.drafted_players.discard(row['player'])
+                    st.rerun()
+            else:
+                if st.button("⭕", key=f"draft_{idx}", help="Click to draft"):
+                    st.session_state.drafted_players.add(row['player'])
+                    st.rerun()
+        
+        with col2:
+            # Player name with drafted indicator
+            player_name = row['player']
+            if row['player'] in st.session_state.drafted_players:
+                st.markdown(f"~~{player_name}~~ ✅")
+            else:
+                st.markdown(f"**{player_name}**")
+        
+        with col3:
+            st.text(f"{row['team']}")
+        
+        with col4:
+            # Position with color coding
+            pos = row['position']
+            if pos == 'QB':
+                st.markdown(f'<span style="background-color: #FF6B6B; color: white; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
+            elif pos == 'RB':
+                st.markdown(f'<span style="background-color: #4ECDC4; color: white; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
+            elif pos == 'WR':
+                st.markdown(f'<span style="background-color: #45B7D1; color: white; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
+            elif pos == 'TE':
+                st.markdown(f'<span style="background-color: #96CEB4; color: white; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
+            elif pos == 'K':
+                st.markdown(f'<span style="background-color: #FFEAA7; color: black; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
+            else:
+                st.text(pos or "-")
+        
+        with col5:
+            st.text(format_stat(row.get('overallRank'), "float"))
+        
+        with col6:
+            st.text(format_stat(row.get('positionRank'), "float"))
+        
+        with col7:
+            st.text(format_stat(row.get('fantasy')))
+        
+        with col8:
+            # Show relevant stats based on position
+            if row['position'] == 'QB':
+                st.text(format_stat(row.get('passingYards')))
+            elif row['position'] in ['RB', 'WR', 'TE']:
+                if row['position'] == 'RB':
+                    st.text(format_stat(row.get('rushingYards')))
                 else:
-                    if st.button("⭕", key=f"draft_{idx}", help="Click to draft"):
-                        st.session_state.drafted_players.add(row['player'])
-                        st.rerun()
-            
-            with data_col:
-                # Player data row with HTML for horizontal scrolling
-                player_name = row['player']
-                if row['player'] in st.session_state.drafted_players:
-                    player_display = f"<s>{player_name}</s> ✅"
-                    row_style = "opacity: 0.6;"
-                else:
-                    player_display = f"<strong>{player_name}</strong>"
-                    row_style = ""
-                
-                # Position badge styling
-                pos = row['position']
-                if pos == 'QB':
-                    pos_badge = f'<span style="background-color: #FF6B6B; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">{pos}</span>'
-                elif pos == 'RB':
-                    pos_badge = f'<span style="background-color: #4ECDC4; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">{pos}</span>'
-                elif pos == 'WR':
-                    pos_badge = f'<span style="background-color: #45B7D1; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">{pos}</span>'
-                elif pos == 'TE':
-                    pos_badge = f'<span style="background-color: #96CEB4; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">{pos}</span>'
-                elif pos == 'K':
-                    pos_badge = f'<span style="background-color: #FFEAA7; color: black; padding: 2px 6px; border-radius: 3px; font-size: 11px;">{pos}</span>'
-                else:
-                    pos_badge = pos or "-"
-                
-                # Create the data row HTML
-                row_html = f'''
-                <div class="player-row" style="{row_style}">
-                    <div class="player-cell col-draft">-</div>
-                    <div class="player-cell col-player">{player_display}</div>
-                    <div class="player-cell col-team">{row['team']}</div>
-                    <div class="player-cell col-pos">{pos_badge}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('overallRank'), "float")}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('positionRank'), "float")}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('fantasy'))}</div>
-                    <div class="player-cell col-comp-att">{str(row.get('completionsAttempts', '') or '-')}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('passingYards'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('passingTouchdowns'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('interceptionsThrown'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('rushingAttempts'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('rushingYards'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('rushingTouchdowns'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('receptions'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('targets'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('receivingYards'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('receivingTouchdowns'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('extraPointsAttempted'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('extraPointsMade'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('fieldGoalsAttempted'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('fieldGoalsMade'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('fieldGoalsMade0To19'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('fieldGoalsMade20To29'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('fieldGoalsMade30To39'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('fieldGoalsMade40To49'))}</div>
-                    <div class="player-cell col-stat">{format_stat(row.get('fieldGoalsMade50Plus'))}</div>
-                </div>
-                '''
-                st.markdown(row_html, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)  # Close the scrollable container
-    
-
+                    st.text(format_stat(row.get('receivingYards')))
+            else:
+                st.text("-")
+        
+        with col9:
+            # Show TDs based on position
+            if row['position'] == 'QB':
+                st.text(format_stat(row.get('passingTouchdowns')))
+            elif row['position'] == 'RB':
+                total_tds = (row.get('rushingTouchdowns', 0) or 0) + (row.get('receivingTouchdowns', 0) or 0)
+                st.text(format_stat(total_tds))
+            elif row['position'] in ['WR', 'TE']:
+                st.text(format_stat(row.get('receivingTouchdowns')))
+            else:
+                st.text("-")
     
     # Draft summary
     if st.session_state.drafted_players:
