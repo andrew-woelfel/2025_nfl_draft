@@ -158,106 +158,204 @@ def main():
         st.warning("No players match the current filters.")
         return
     
-    # Column headers at the top
-    col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([0.8, 2, 1.5, 0.8, 1, 1, 1, 1, 1])
+    # Player statistics and draft controls
+    if filtered_df.empty:
+        st.warning("No players match the current filters.")
+        return
+    
+    # Prepare data for display with draft status
+    display_df = filtered_df.copy()
+    
+    # Add draft status column at the beginning
+    display_df.insert(0, 'Draft Status', display_df['player'].apply(
+        lambda x: "✅ DRAFTED" if x in st.session_state.drafted_players else "⭕ Available"
+    ))
+    
+    # Add CSS for better table styling and color coding
+    st.markdown("""
+    <style>
+    /* Ensure horizontal scrolling works properly */
+    div[data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+        max-width: 100% !important;
+    }
+    
+    div[data-testid="stDataFrame"] > div {
+        min-width: max-content !important;
+        white-space: nowrap !important;
+    }
+    
+    /* Style the dataframe */
+    .dataframe {
+        font-size: 12px !important;
+    }
+    
+    /* Color coding for drafted players */
+    .dataframe tbody tr:has(td:first-child:contains("✅ DRAFTED")) {
+        background-color: #ffebee !important;
+        opacity: 0.8 !important;
+    }
+    
+    .dataframe tbody tr:has(td:first-child:contains("⭕ Available")) {
+        background-color: #e8f5e8 !important;
+    }
+    
+    /* Style draft status cells specifically */
+    .dataframe td:contains("✅ DRAFTED") {
+        background-color: #f44336 !important;
+        color: white !important;
+        font-weight: bold !important;
+    }
+    
+    .dataframe td:contains("⭕ Available") {
+        background-color: #4caf50 !important;
+        color: white !important;
+        font-weight: bold !important;
+    }
+    
+    /* Ensure scrollbars are visible */
+    div[data-testid="stDataFrame"]::-webkit-scrollbar {
+        height: 12px;
+        background-color: #f1f1f1;
+    }
+    
+    div[data-testid="stDataFrame"]::-webkit-scrollbar-thumb {
+        background-color: #888;
+        border-radius: 6px;
+    }
+    
+    div[data-testid="stDataFrame"]::-webkit-scrollbar-thumb:hover {
+        background-color: #555;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Player statistics table
+    st.subheader("📊 Player Statistics")
+    
+    # Reorder and select columns for display (including draft status)
+    columns_to_show = [
+        'Draft Status', 'player', 'team', 'position', 'overallRank', 'positionRank', 'fantasy',
+        'completionsAttempts', 'passingYards', 'passingTouchdowns', 'interceptionsThrown',
+        'rushingAttempts', 'rushingYards', 'rushingTouchdowns',
+        'receptions', 'targets', 'receivingYards', 'receivingTouchdowns',
+        'extraPointsAttempted', 'extraPointsMade', 'fieldGoalsAttempted', 'fieldGoalsMade',
+        'fieldGoalsMade0To19', 'fieldGoalsMade20To29', 'fieldGoalsMade30To39', 
+        'fieldGoalsMade40To49', 'fieldGoalsMade50Plus'
+    ]
+    
+    # Filter to only columns that exist
+    available_columns = [col for col in columns_to_show if col in display_df.columns]
+    table_df = display_df[available_columns].copy()
+    
+    # Rename columns for better display
+    column_renames = {
+        'player': 'Player',
+        'team': 'Team',
+        'position': 'Pos',
+        'overallRank': 'Overall',
+        'positionRank': 'Pos Rank', 
+        'fantasy': 'Fantasy',
+        'completionsAttempts': 'Comp/Att',
+        'passingYards': 'Pass Yds',
+        'passingTouchdowns': 'Pass TD',
+        'interceptionsThrown': 'INT',
+        'rushingAttempts': 'Rush Att',
+        'rushingYards': 'Rush Yds',
+        'rushingTouchdowns': 'Rush TD',
+        'receptions': 'Rec',
+        'targets': 'Targets',
+        'receivingYards': 'Rec Yds',
+        'receivingTouchdowns': 'Rec TD',
+        'extraPointsAttempted': 'XP Att',
+        'extraPointsMade': 'XP Made',
+        'fieldGoalsAttempted': 'FG Att',
+        'fieldGoalsMade': 'FG Made',
+        'fieldGoalsMade0To19': 'FG 0-19',
+        'fieldGoalsMade20To29': 'FG 20-29',
+        'fieldGoalsMade30To39': 'FG 30-39',
+        'fieldGoalsMade40To49': 'FG 40-49',
+        'fieldGoalsMade50Plus': 'FG 50+'
+    }
+    
+    table_df = table_df.rename(columns=column_renames)
+    
+    # Display the scrollable dataframe with enhanced column configuration
+    st.dataframe(
+        table_df,
+        use_container_width=False,
+        hide_index=True,
+        height=400,
+        column_config={
+            "Draft Status": st.column_config.TextColumn(
+                "Draft Status",
+                width="medium",
+                help="Shows if player is drafted (✅) or available (⭕)"
+            ),
+            "Player": st.column_config.TextColumn("Player", width="large"),
+            "Team": st.column_config.TextColumn("Team", width="medium"),
+            "Pos": st.column_config.TextColumn("Position", width="small"),
+            "Overall": st.column_config.NumberColumn("Overall Rank", width="small", format="%.1f"),
+            "Pos Rank": st.column_config.NumberColumn("Position Rank", width="small", format="%.1f"),
+            "Fantasy": st.column_config.NumberColumn("Fantasy Points", width="medium", format="%.1f"),
+            "Comp/Att": st.column_config.TextColumn("Completions/Attempts", width="medium"),
+            "Pass Yds": st.column_config.NumberColumn("Passing Yards", width="small", format="%.0f"),
+            "Pass TD": st.column_config.NumberColumn("Passing TDs", width="small", format="%.1f"),
+            "INT": st.column_config.NumberColumn("Interceptions", width="small", format="%.1f"),
+            "Rush Att": st.column_config.NumberColumn("Rushing Attempts", width="small", format="%.1f"),
+            "Rush Yds": st.column_config.NumberColumn("Rushing Yards", width="small", format="%.0f"),
+            "Rush TD": st.column_config.NumberColumn("Rushing TDs", width="small", format="%.1f"),
+            "Rec": st.column_config.NumberColumn("Receptions", width="small", format="%.1f"),
+            "Targets": st.column_config.NumberColumn("Targets", width="small", format="%.1f"),
+            "Rec Yds": st.column_config.NumberColumn("Receiving Yards", width="small", format="%.0f"),
+            "Rec TD": st.column_config.NumberColumn("Receiving TDs", width="small", format="%.1f")
+        }
+    )
+    
+    # Show summary of drafted vs available players in current view
+    current_drafted = sum(1 for player in table_df['Player'] if player in st.session_state.drafted_players)
+    current_available = len(table_df) - current_drafted
+    
+    col1, col2 = st.columns(2)
     with col1:
-        st.markdown("**Draft**")
+        st.metric("📋 Drafted (in current view)", current_drafted)
     with col2:
-        st.markdown("**Player**")
-    with col3:
-        st.markdown("**Team**")
-    with col4:
-        st.markdown("**Pos**")
-    with col5:
-        st.markdown("**Overall**")
-    with col6:
-        st.markdown("**Pos Rank**")
-    with col7:
-        st.markdown("**Fantasy**")
-    with col8:
-        st.markdown("**Yards**")
-    with col9:
-        st.markdown("**TDs**")
+        st.metric("⭕ Available (in current view)", current_available)
     
     st.markdown("---")
     
-    # Create display dataframe
-    display_df = filtered_df.copy()
+    # Individual draft controls for each player
+    st.subheader("🏈 Draft Controls")
     
-    # Quick draft buttons and player table
-    for idx, row in display_df.iterrows():
-        col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([0.8, 2, 1.5, 0.8, 1, 1, 1, 1, 1])
+    # Create a more compact button layout
+    players_per_row = 4
+    
+    for i in range(0, len(display_df), players_per_row):
+        cols = st.columns(players_per_row)
         
-        with col1:
-            # Draft button
-            if row['player'] in st.session_state.drafted_players:
-                if st.button("✅", key=f"undraft_{idx}", help="Click to undraft"):
-                    st.session_state.drafted_players.discard(row['player'])
-                    st.rerun()
-            else:
-                if st.button("⭕", key=f"draft_{idx}", help="Click to draft"):
-                    st.session_state.drafted_players.add(row['player'])
-                    st.rerun()
-        
-        with col2:
-            # Player name with drafted indicator
-            player_name = row['player']
-            if row['player'] in st.session_state.drafted_players:
-                st.markdown(f"~~{player_name}~~ ✅")
-            else:
-                st.markdown(f"**{player_name}**")
-        
-        with col3:
-            st.text(f"{row['team']}")
-        
-        with col4:
-            # Position with color coding
-            pos = row['position']
-            if pos == 'QB':
-                st.markdown(f'<span style="background-color: #FF6B6B; color: white; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
-            elif pos == 'RB':
-                st.markdown(f'<span style="background-color: #4ECDC4; color: white; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
-            elif pos == 'WR':
-                st.markdown(f'<span style="background-color: #45B7D1; color: white; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
-            elif pos == 'TE':
-                st.markdown(f'<span style="background-color: #96CEB4; color: white; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
-            elif pos == 'K':
-                st.markdown(f'<span style="background-color: #FFEAA7; color: black; padding: 2px 6px; border-radius: 3px;">{pos}</span>', unsafe_allow_html=True)
-            else:
-                st.text(pos or "-")
-        
-        with col5:
-            st.text(format_stat(row.get('overallRank'), "float"))
-        
-        with col6:
-            st.text(format_stat(row.get('positionRank'), "float"))
-        
-        with col7:
-            st.text(format_stat(row.get('fantasy')))
-        
-        with col8:
-            # Show relevant stats based on position
-            if row['position'] == 'QB':
-                st.text(format_stat(row.get('passingYards')))
-            elif row['position'] in ['RB', 'WR', 'TE']:
-                if row['position'] == 'RB':
-                    st.text(format_stat(row.get('rushingYards')))
-                else:
-                    st.text(format_stat(row.get('receivingYards')))
-            else:
-                st.text("-")
-        
-        with col9:
-            # Show TDs based on position
-            if row['position'] == 'QB':
-                st.text(format_stat(row.get('passingTouchdowns')))
-            elif row['position'] == 'RB':
-                total_tds = (row.get('rushingTouchdowns', 0) or 0) + (row.get('receivingTouchdowns', 0) or 0)
-                st.text(format_stat(total_tds))
-            elif row['position'] in ['WR', 'TE']:
-                st.text(format_stat(row.get('receivingTouchdowns')))
-            else:
-                st.text("-")
+        for j, (idx, row) in enumerate(display_df.iloc[i:i+players_per_row].iterrows()):
+            if j < len(cols):
+                with cols[j]:
+                    player_name = row['player']
+                    
+                    # Player info
+                    st.markdown(f"**{player_name}**")
+                    st.text(f"{row['team']} - {row['position']}")
+                    st.text(f"Rank: {format_stat(row.get('overallRank'))}")
+                    
+                    # Draft button
+                    if player_name in st.session_state.drafted_players:
+                        if st.button(f"✅ Drafted", key=f"individual_undraft_{idx}", type="secondary", use_container_width=True):
+                            st.session_state.drafted_players.discard(player_name)
+                            st.rerun()
+                        st.markdown("*Player is drafted*")
+                    else:
+                        if st.button(f"⭕ Draft Player", key=f"individual_draft_{idx}", type="primary", use_container_width=True):
+                            st.session_state.drafted_players.add(player_name)
+                            st.rerun()
+                        st.markdown("*Available*")
+                    
+                    st.markdown("---")
     
     # Draft summary
     if st.session_state.drafted_players:
