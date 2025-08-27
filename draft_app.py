@@ -163,13 +163,55 @@ def main():
         st.warning("No players match the current filters.")
         return
     
-    # Prepare data for display with draft status
+    # Add team logo functionality
+    def get_team_logo_url(team_name):
+        """Get team logo URL - using ESPN logos"""
+        team_logos = {
+            'Arizona Cardinals': 'https://a.espncdn.com/i/teamlogos/nfl/500/ari.png',
+            'Atlanta Falcons': 'https://a.espncdn.com/i/teamlogos/nfl/500/atl.png',
+            'Baltimore Ravens': 'https://a.espncdn.com/i/teamlogos/nfl/500/bal.png',
+            'Buffalo Bills': 'https://a.espncdn.com/i/teamlogos/nfl/500/buf.png',
+            'Carolina Panthers': 'https://a.espncdn.com/i/teamlogos/nfl/500/car.png',
+            'Chicago Bears': 'https://a.espncdn.com/i/teamlogos/nfl/500/chi.png',
+            'Cincinnati Bengals': 'https://a.espncdn.com/i/teamlogos/nfl/500/cin.png',
+            'Cleveland Browns': 'https://a.espncdn.com/i/teamlogos/nfl/500/cle.png',
+            'Dallas Cowboys': 'https://a.espncdn.com/i/teamlogos/nfl/500/dal.png',
+            'Denver Broncos': 'https://a.espncdn.com/i/teamlogos/nfl/500/den.png',
+            'Detroit Lions': 'https://a.espncdn.com/i/teamlogos/nfl/500/det.png',
+            'Green Bay Packers': 'https://a.espncdn.com/i/teamlogos/nfl/500/gb.png',
+            'Houston Texans': 'https://a.espncdn.com/i/teamlogos/nfl/500/hou.png',
+            'Indianapolis Colts': 'https://a.espncdn.com/i/teamlogos/nfl/500/ind.png',
+            'Jacksonville Jaguars': 'https://a.espncdn.com/i/teamlogos/nfl/500/jax.png',
+            'Kansas City Chiefs': 'https://a.espncdn.com/i/teamlogos/nfl/500/kc.png',
+            'Las Vegas Raiders': 'https://a.espncdn.com/i/teamlogos/nfl/500/lv.png',
+            'Los Angeles Chargers': 'https://a.espncdn.com/i/teamlogos/nfl/500/lac.png',
+            'Los Angeles Rams': 'https://a.espncdn.com/i/teamlogos/nfl/500/lar.png',
+            'Miami Dolphins': 'https://a.espncdn.com/i/teamlogos/nfl/500/mia.png',
+            'Minnesota Vikings': 'https://a.espncdn.com/i/teamlogos/nfl/500/min.png',
+            'New England Patriots': 'https://a.espncdn.com/i/teamlogos/nfl/500/ne.png',
+            'New Orleans Saints': 'https://a.espncdn.com/i/teamlogos/nfl/500/no.png',
+            'New York Giants': 'https://a.espncdn.com/i/teamlogos/nfl/500/nyg.png',
+            'New York Jets': 'https://a.espncdn.com/i/teamlogos/nfl/500/nyj.png',
+            'Philadelphia Eagles': 'https://a.espncdn.com/i/teamlogos/nfl/500/phi.png',
+            'Pittsburgh Steelers': 'https://a.espncdn.com/i/teamlogos/nfl/500/pit.png',
+            'San Francisco 49ers': 'https://a.espncdn.com/i/teamlogos/nfl/500/sf.png',
+            'Seattle Seahawks': 'https://a.espncdn.com/i/teamlogos/nfl/500/sea.png',
+            'Tampa Bay Buccaneers': 'https://a.espncdn.com/i/teamlogos/nfl/500/tb.png',
+            'Tennessee Titans': 'https://a.espncdn.com/i/teamlogos/nfl/500/ten.png',
+            'Washington Commanders': 'https://a.espncdn.com/i/teamlogos/nfl/500/wsh.png'
+        }
+        return team_logos.get(team_name, '')
+    
+    # Prepare data for display with draft status and team logos
     display_df = filtered_df.copy()
     
     # Add draft status column at the beginning
     display_df.insert(0, 'Draft Status', display_df['player'].apply(
         lambda x: "✅ DRAFTED" if x in st.session_state.drafted_players else "⭕ Available"
     ))
+    
+    # Add team logo column
+    display_df.insert(2, 'Logo', display_df['team'].apply(get_team_logo_url))
     
     # Add CSS for better table styling, color coding, and frozen columns
     st.markdown("""
@@ -273,9 +315,9 @@ def main():
     # Player statistics table
     st.subheader("📊 Player Statistics")
     
-    # Reorder and select columns for display (including draft status)
+    # Reorder and select columns for display (including logo and draft status)
     columns_to_show = [
-        'Draft Status', 'player', 'team', 'position', 'overallRank', 'positionRank', 'fantasy',
+        'Draft Status', 'player', 'Logo', 'team', 'position', 'overallRank', 'positionRank', 'fantasy',
         'completionsAttempts', 'passingYards', 'passingTouchdowns', 'interceptionsThrown',
         'rushingAttempts', 'rushingYards', 'rushingTouchdowns',
         'receptions', 'targets', 'receivingYards', 'receivingTouchdowns',
@@ -333,6 +375,11 @@ def main():
                 help="Shows if player is drafted (✅) or available (⭕)"
             ),
             "Player": st.column_config.TextColumn("Player", width="large"),
+            "Logo": st.column_config.ImageColumn(
+                "Logo",
+                width="small",
+                help="Team logo"
+            ),
             "Team": st.column_config.TextColumn("Team", width="medium"),
             "Pos": st.column_config.TextColumn("Position", width="small"),
             "Overall": st.column_config.NumberColumn("Overall Rank", width="small", format="%.1f"),
