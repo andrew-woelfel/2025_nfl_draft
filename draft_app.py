@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import requests
+import json
+import time
 
 # Set page config
 st.set_page_config(
@@ -9,9 +12,123 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize session state for drafted players
+# Initialize session state for drafted players and Sleeper data
 if 'drafted_players' not in st.session_state:
     st.session_state.drafted_players = set()
+if 'sleeper_picks' not in st.session_state:
+    st.session_state.sleeper_picks = {}
+if 'sleeper_league_info' not in st.session_state:
+    st.session_state.sleeper_league_info = None
+if 'sleeper_draft_info' not in st.session_state:
+    st.session_state.sleeper_draft_info = None
+if 'connection_type' not in st.session_state:
+    st.session_state.connection_type = None
+if 'current_league_id' not in st.session_state:
+    st.session_state.current_league_id = None
+if 'current_draft_id' not in st.session_state:
+    st.session_state.current_draft_id = None
+if 'auto_sync_active' not in st.session_state:
+    st.session_state.auto_sync_active = False
+if 'last_sync_time' not in st.session_state:
+    st.session_state.last_sync_time = 0
+if 'sync_in_progress' not in st.session_state:
+    st.session_state.sync_in_progress = False
+
+@st.cache_data
+def get_sleeper_draft_info(draft_id):
+    """Fetch draft information directly by draft ID (works for mock drafts and league drafts)"""
+    try:
+        response = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}")
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error fetching draft info: {e}")
+        return None
+
+@st.cache_data
+def get_sleeper_draft_picks_by_id(draft_id):
+    """Fetch draft picks directly by draft ID (works for mock drafts and league drafts)"""
+    try:
+        # Fetch draft picks
+        response = requests.get(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
+        if response.status_code == 200:
+            picks = response.json()
+            
+            # Get player info to map player IDs to names
+            players_response = requests.get("https://api.sleeper.app/v1/players/nfl")
+            if players_response.status_code == 200:
+                players_data = players_response.json()
+                
+                # Create a mapping of picks to player names
+                drafted_players = {}
+                for pick in picks:
+                    player_id = pick.get('player_id')
+                    if player_id and player_id in players_data:
+                        player_info = players_data[player_id]
+                        full_name = f"{player_info.get('first_name', '')} {player_info.get('last_name', '')}".strip()
+                        drafted_players[full_name] = {
+                            'pick_no': pick.get('pick_no'),
+                            'round': pick.get('round'),
+                            'picked_by': pick.get('picked_by'),
+                            'team': player_info.get('team', ''),
+                            'position': player_info.get('position', '')
+                        }
+                
+                return drafted_players
+        
+        return {}
+    except Exception as e:
+        st.error(f"Error fetching draft picks: {e}")
+        return {}
+
+@st.cache_data
+def get_sleeper_league_info(league_id):
+    """Fetch league information from Sleeper API"""
+    try:
+        response = requests.get(f"https://api.sleeper.app/v1/league/{league_id}")
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error fetching league info: {e}")
+        return None
+
+@st.cache_data
+def get_sleeper_draft_picks(league_id):
+    """Fetch draft picks from Sleeper API using league ID"""
+    try:
+        # First get the league info to find draft IDs
+        league_info = get_sleeper_league_info(league_id)
+        if not league_info:
+            return {}
+        
+        # Get the most recent draft ID
+        draft_id = league_info.get('draft_id')
+        if not draft_id:
+            st.warning("No draft found for this league")
+            return {}
+        
+        return get_sleeper_draft_picks_by_id(draft_id)
+        
+    except Exception as e:
+        st.error(f"Error fetching draft picks: {e}")
+        return {}
+
+@st.cache_data
+def get_sleeper_users(league_id):
+    """Fetch league users from Sleeper API"""
+    try:
+        response = requests.get(f"https://api.sleeper.app/v1/league/{league_id}/users")
+        if response.status_code == 200:
+            users = response.json()
+            return {user['user_id']: user['display_name'] for user in users}
+        return {}
+    except Exception as e:
+        st.error(f"Error fetching users: {e}")
+        return {}
 
 @st.cache_data
 def load_data(uploaded_file=None):
@@ -55,8 +172,317 @@ def format_stat(value, stat_type="float"):
         return f"{value:.1f}"
     return str(int(value))
 
+def get_team_logo_url(team_name):
+    """Get team logo URL - using ESPN logos"""
+    team_logos = {
+        'Arizona Cardinals': 'https://a.espncdn.com/i/teamlogos/nfl/500/ari.png',
+        'Atlanta Falcons': 'https://a.espncdn.com/i/teamlogos/nfl/500/atl.png',
+        'Baltimore Ravens': 'https://a.espncdn.com/i/teamlogos/nfl/500/bal.png',
+        'Buffalo Bills': 'https://a.espncdn.com/i/teamlogos/nfl/500/buf.png',
+        'Carolina Panthers': 'https://a.espncdn.com/i/teamlogos/nfl/500/car.png',
+        'Chicago Bears': 'https://a.espncdn.com/i/teamlogos/nfl/500/chi.png',
+        'Cincinnati Bengals': 'https://a.espncdn.com/i/teamlogos/nfl/500/cin.png',
+        'Cleveland Browns': 'https://a.espncdn.com/i/teamlogos/nfl/500/cle.png',
+        'Dallas Cowboys': 'https://a.espncdn.com/i/teamlogos/nfl/500/dal.png',
+        'Denver Broncos': 'https://a.espncdn.com/i/teamlogos/nfl/500/den.png',
+        'Detroit Lions': 'https://a.espncdn.com/i/teamlogos/nfl/500/det.png',
+        'Green Bay Packers': 'https://a.espncdn.com/i/teamlogos/nfl/500/gb.png',
+        'Houston Texans': 'https://a.espncdn.com/i/teamlogos/nfl/500/hou.png',
+        'Indianapolis Colts': 'https://a.espncdn.com/i/teamlogos/nfl/500/ind.png',
+        'Jacksonville Jaguars': 'https://a.espncdn.com/i/teamlogos/nfl/500/jax.png',
+        'Kansas City Chiefs': 'https://a.espncdn.com/i/teamlogos/nfl/500/kc.png',
+        'Las Vegas Raiders': 'https://a.espncdn.com/i/teamlogos/nfl/500/lv.png',
+        'Los Angeles Chargers': 'https://a.espncdn.com/i/teamlogos/nfl/500/lac.png',
+        'Los Angeles Rams': 'https://a.espncdn.com/i/teamlogos/nfl/500/lar.png',
+        'Miami Dolphins': 'https://a.espncdn.com/i/teamlogos/nfl/500/mia.png',
+        'Minnesota Vikings': 'https://a.espncdn.com/i/teamlogos/nfl/500/min.png',
+        'New England Patriots': 'https://a.espncdn.com/i/teamlogos/nfl/500/ne.png',
+        'New Orleans Saints': 'https://a.espncdn.com/i/teamlogos/nfl/500/no.png',
+        'New York Giants': 'https://a.espncdn.com/i/teamlogos/nfl/500/nyg.png',
+        'New York Jets': 'https://a.espncdn.com/i/teamlogos/nfl/500/nyj.png',
+        'Philadelphia Eagles': 'https://a.espncdn.com/i/teamlogos/nfl/500/phi.png',
+        'Pittsburgh Steelers': 'https://a.espncdn.com/i/teamlogos/nfl/500/pit.png',
+        'San Francisco 49ers': 'https://a.espncdn.com/i/teamlogos/nfl/500/sf.png',
+        'Seattle Seahawks': 'https://a.espncdn.com/i/teamlogos/nfl/500/sea.png',
+        'Tampa Bay Buccaneers': 'https://a.espncdn.com/i/teamlogos/nfl/500/tb.png',
+        'Tennessee Titans': 'https://a.espncdn.com/i/teamlogos/nfl/500/ten.png',
+        'Washington Commanders': 'https://a.espncdn.com/i/teamlogos/nfl/500/wsh.png'
+    }
+    return team_logos.get(team_name, '')
+
+def perform_sync(connection_type, league_id=None, draft_id=None):
+    """Perform sync operation for either league or mock draft"""
+    if st.session_state.sync_in_progress:
+        return False, "Sync already in progress"
+    
+    try:
+        st.session_state.sync_in_progress = True
+        
+        if connection_type == "league" and league_id:
+            # Clear cache and fetch league data
+            get_sleeper_draft_picks.clear()
+            get_sleeper_league_info.clear()
+            sleeper_picks = get_sleeper_draft_picks(league_id)
+        elif connection_type == "mock" and draft_id:
+            # Clear cache and fetch mock draft data
+            get_sleeper_draft_picks_by_id.clear()
+            get_sleeper_draft_info.clear()
+            sleeper_picks = get_sleeper_draft_picks_by_id(draft_id)
+        else:
+            return False, "Invalid sync parameters"
+        
+        # Update session state
+        old_count = len(st.session_state.sleeper_picks)
+        st.session_state.sleeper_picks = sleeper_picks
+        
+        # Update drafted players set (preserve manual picks, update with Sleeper picks)
+        manual_picks = {player for player in st.session_state.drafted_players 
+                      if player not in st.session_state.sleeper_picks}
+        st.session_state.drafted_players = manual_picks.union(set(sleeper_picks.keys()))
+        
+        # Update last sync time
+        st.session_state.last_sync_time = time.time()
+        
+        new_count = len(sleeper_picks)
+        return True, f"Synced {new_count} picks" + (f" (+{new_count - old_count} new)" if new_count > old_count else "")
+        
+    except Exception as e:
+        return False, f"Sync error: {str(e)}"
+    finally:
+        st.session_state.sync_in_progress = False
+
 def main():
     st.title("🏈 NFL Fantasy Football Draft Board")
+    
+    # Sleeper API Integration Section
+    st.sidebar.header("🛏️ Sleeper Integration")
+    
+    # Choose connection type
+    connection_type = st.sidebar.radio(
+        "Connection Type:",
+        ["League Draft", "Mock Draft (Direct ID)"],
+        help="Choose how to connect to Sleeper"
+    )
+    
+    if connection_type == "League Draft":
+        # Input for Sleeper League ID
+        sleeper_league_id = st.sidebar.text_input(
+            "Sleeper League ID",
+            placeholder="Enter your Sleeper league ID",
+            help="Find your league ID in your Sleeper league URL: sleeper.app/leagues/{league_id}/team"
+        )
+        
+        # Connect to Sleeper League button
+        if st.sidebar.button("Connect to League Draft", type="primary"):
+            if sleeper_league_id:
+                with st.sidebar:
+                    with st.spinner("Connecting to Sleeper League..."):
+                        # Store the league ID for syncing
+                        st.session_state.current_league_id = sleeper_league_id
+                        st.session_state.current_draft_id = None  # Clear draft ID
+                        
+                        # Fetch league info
+                        league_info = get_sleeper_league_info(sleeper_league_id)
+                        if league_info:
+                            st.session_state.sleeper_league_info = league_info
+                            st.session_state.sleeper_draft_info = None
+                            st.session_state.connection_type = "league"
+                            st.success(f"Connected to: {league_info.get('name', 'Unknown League')}")
+                            
+                            # Fetch drafted players
+                            sleeper_picks = get_sleeper_draft_picks(sleeper_league_id)
+                            st.session_state.sleeper_picks = sleeper_picks
+                            
+                            # Update drafted players set (preserve any existing manual picks)
+                            st.session_state.drafted_players.update(sleeper_picks.keys())
+                            
+                            st.success(f"Loaded {len(sleeper_picks)} drafted players")
+                        else:
+                            st.error("Could not connect to Sleeper. Check your league ID.")
+            else:
+                st.sidebar.error("Please enter a league ID")
+    
+    else:  # Mock Draft (Direct ID)
+        # Input for Draft ID
+        sleeper_draft_id = st.sidebar.text_input(
+            "Sleeper Draft ID", 
+            placeholder="Enter your mock draft ID",
+            help="Find your draft ID in the Sleeper mock draft URL: sleeper.app/draft/nfl/{draft_id}"
+        )
+        
+        # Connect to Mock Draft button
+        if st.sidebar.button("Connect to Mock Draft", type="primary"):
+            if sleeper_draft_id:
+                with st.sidebar:
+                    with st.spinner("Connecting to Mock Draft..."):
+                        # Store the draft ID for syncing
+                        st.session_state.current_draft_id = sleeper_draft_id
+                        st.session_state.current_league_id = None  # Clear league ID
+                        
+                        # Fetch draft info
+                        draft_info = get_sleeper_draft_info(sleeper_draft_id)
+                        if draft_info:
+                            st.session_state.sleeper_draft_info = draft_info
+                            st.session_state.sleeper_league_info = None
+                            st.session_state.connection_type = "mock"
+                            
+                            draft_type = draft_info.get('type', 'unknown')
+                            st.success(f"Connected to: {draft_type.title()} Draft")
+                            
+                            # Fetch drafted players
+                            sleeper_picks = get_sleeper_draft_picks_by_id(sleeper_draft_id)
+                            st.session_state.sleeper_picks = sleeper_picks
+                            
+                            # Update drafted players set (preserve any existing manual picks)
+                            st.session_state.drafted_players.update(sleeper_picks.keys())
+                            
+                            st.success(f"Loaded {len(sleeper_picks)} drafted players")
+                        else:
+                            st.error("Could not connect to draft. Check your draft ID.")
+            else:
+                st.sidebar.error("Please enter a draft ID")
+    
+    # Display connection status
+    if st.session_state.sleeper_league_info or st.session_state.sleeper_draft_info:
+        st.sidebar.success("✅ Connected to Sleeper")
+        
+        if st.session_state.connection_type == "league" and st.session_state.sleeper_league_info:
+            st.sidebar.info(f"League: {st.session_state.sleeper_league_info.get('name')}")
+            st.sidebar.info(f"Season: {st.session_state.sleeper_league_info.get('season')}")
+            
+            # Sync button for league draft
+            if st.sidebar.button("🔄 Sync League Draft"):
+                if st.session_state.current_league_id:
+                    with st.sidebar:
+                        with st.spinner("Syncing..."):
+                            # Clear cache to force fresh data fetch
+                            get_sleeper_draft_picks.clear()
+                            get_sleeper_league_info.clear()
+                            
+                            sleeper_picks = get_sleeper_draft_picks(st.session_state.current_league_id)
+                            st.session_state.sleeper_picks = sleeper_picks
+                            
+                            # Update drafted players set (preserve manual picks, update with Sleeper picks)
+                            manual_picks = {player for player in st.session_state.drafted_players 
+                                          if player not in st.session_state.sleeper_picks}
+                            st.session_state.drafted_players = manual_picks.union(set(sleeper_picks.keys()))
+                            
+                            st.success("League draft data synced!")
+                            st.success(f"Updated with {len(sleeper_picks)} Sleeper picks")
+                else:
+                    st.sidebar.error("No league ID stored. Please reconnect to league.")
+            
+            # Auto-sync toggle for league draft
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                if st.button("🔄 Auto-Sync ON" if not st.session_state.auto_sync_active else "⏸️ Auto-Sync OFF", 
+                           type="secondary" if not st.session_state.auto_sync_active else "primary"):
+                    st.session_state.auto_sync_active = not st.session_state.auto_sync_active
+                    if st.session_state.auto_sync_active:
+                        st.success("Auto-sync started!")
+                    else:
+                        st.info("Auto-sync stopped")
+            
+            with col2:
+                if st.session_state.auto_sync_active:
+                    st.markdown("🟢 **LIVE**")
+                else:
+                    st.markdown("⚫ **MANUAL**")
+        
+        elif st.session_state.connection_type == "mock" and st.session_state.sleeper_draft_info:
+            draft_info = st.session_state.sleeper_draft_info
+            st.sidebar.info(f"Draft Type: {draft_info.get('type', 'Unknown').title()}")
+            st.sidebar.info(f"Status: {draft_info.get('status', 'Unknown').title()}")
+            st.sidebar.info(f"Settings: {draft_info.get('settings', {}).get('teams', 'Unknown')} teams")
+            
+            # Sync button for mock draft
+            if st.sidebar.button("🔄 Sync Mock Draft"):
+                if st.session_state.current_draft_id:
+                    with st.sidebar:
+                        with st.spinner("Syncing..."):
+                            # Clear cache to force fresh data fetch
+                            get_sleeper_draft_picks_by_id.clear()
+                            get_sleeper_draft_info.clear()
+                            
+                            sleeper_picks = get_sleeper_draft_picks_by_id(st.session_state.current_draft_id)
+                            st.session_state.sleeper_picks = sleeper_picks
+                            
+                            # Update drafted players set (preserve manual picks, update with Sleeper picks)
+                            manual_picks = {player for player in st.session_state.drafted_players 
+                                          if player not in st.session_state.sleeper_picks}
+                            st.session_state.drafted_players = manual_picks.union(set(sleeper_picks.keys()))
+                            
+                            st.success("Mock draft data synced!")
+                            st.success(f"Updated with {len(sleeper_picks)} Sleeper picks")
+                else:
+                    st.sidebar.error("No draft ID stored. Please reconnect to mock draft.")
+            
+            # Auto-sync toggle for mock draft
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                if st.button("🔄 Auto-Sync ON" if not st.session_state.auto_sync_active else "⏸️ Auto-Sync OFF", 
+                           type="secondary" if not st.session_state.auto_sync_active else "primary"):
+                    st.session_state.auto_sync_active = not st.session_state.auto_sync_active
+                    if st.session_state.auto_sync_active:
+                        st.success("Auto-sync started!")
+                    else:
+                        st.info("Auto-sync stopped")
+            
+            with col2:
+                if st.session_state.auto_sync_active:
+                    st.markdown("🟢 **LIVE**")
+                else:
+                    st.markdown("⚫ **MANUAL**")
+    
+    st.sidebar.markdown("---")
+    
+    # Auto-sync functionality with proper timing control
+    if st.session_state.auto_sync_active and (st.session_state.current_league_id or st.session_state.current_draft_id):
+        current_time = time.time()
+        time_since_last_sync = current_time - st.session_state.last_sync_time
+        
+        # Only sync if 5 seconds have passed since last sync and no sync is in progress
+        if time_since_last_sync >= 5.0 and not st.session_state.sync_in_progress:
+            # Create a placeholder for sync status
+            with st.sidebar:
+                sync_placeholder = st.empty()
+                sync_placeholder.info("🔄 Auto-syncing...")
+                
+            # Perform auto-sync
+            success, message = perform_sync(
+                st.session_state.connection_type,
+                st.session_state.current_league_id,
+                st.session_state.current_draft_id
+            )
+            
+            if success:
+                sync_placeholder.success(f"✅ {message}")
+                time.sleep(1)  # Show success message briefly
+            else:
+                sync_placeholder.error(f"❌ {message}")
+                time.sleep(2)  # Show error message longer
+            
+            # Clear the message and trigger refresh
+            sync_placeholder.empty()
+            st.rerun()
+        else:
+            # Show countdown to next sync
+            time_until_next = 5.0 - time_since_last_sync
+            if time_until_next > 0:
+                st.sidebar.caption(f"Next sync in: {time_until_next:.1f}s")
+    
+    # Show auto-sync status if active
+    if st.session_state.auto_sync_active:
+        st.sidebar.info("🔄 Auto-syncing every 5 seconds...")
+        if st.session_state.last_sync_time > 0:
+            last_sync_formatted = time.strftime('%H:%M:%S', time.localtime(st.session_state.last_sync_time))
+            st.sidebar.caption(f"Last sync: {last_sync_formatted}")
+        
+        # Show sync status
+        if st.session_state.sync_in_progress:
+            st.sidebar.warning("⏳ Sync in progress...")
+        else:
+            st.sidebar.success("✅ Ready for next sync")
     
     # File upload section
     uploaded_file = st.file_uploader(
@@ -151,166 +577,31 @@ def main():
     
     st.markdown("---")
     
-    # Display player list
-    st.header("Player List")
-    
-    if filtered_df.empty:
-        st.warning("No players match the current filters.")
-        return
-    
     # Player statistics and draft controls
     if filtered_df.empty:
         st.warning("No players match the current filters.")
         return
     
-    # Add team logo functionality
-    def get_team_logo_url(team_name):
-        """Get team logo URL - using ESPN logos"""
-        team_logos = {
-            'Arizona Cardinals': 'https://a.espncdn.com/i/teamlogos/nfl/500/ari.png',
-            'Atlanta Falcons': 'https://a.espncdn.com/i/teamlogos/nfl/500/atl.png',
-            'Baltimore Ravens': 'https://a.espncdn.com/i/teamlogos/nfl/500/bal.png',
-            'Buffalo Bills': 'https://a.espncdn.com/i/teamlogos/nfl/500/buf.png',
-            'Carolina Panthers': 'https://a.espncdn.com/i/teamlogos/nfl/500/car.png',
-            'Chicago Bears': 'https://a.espncdn.com/i/teamlogos/nfl/500/chi.png',
-            'Cincinnati Bengals': 'https://a.espncdn.com/i/teamlogos/nfl/500/cin.png',
-            'Cleveland Browns': 'https://a.espncdn.com/i/teamlogos/nfl/500/cle.png',
-            'Dallas Cowboys': 'https://a.espncdn.com/i/teamlogos/nfl/500/dal.png',
-            'Denver Broncos': 'https://a.espncdn.com/i/teamlogos/nfl/500/den.png',
-            'Detroit Lions': 'https://a.espncdn.com/i/teamlogos/nfl/500/det.png',
-            'Green Bay Packers': 'https://a.espncdn.com/i/teamlogos/nfl/500/gb.png',
-            'Houston Texans': 'https://a.espncdn.com/i/teamlogos/nfl/500/hou.png',
-            'Indianapolis Colts': 'https://a.espncdn.com/i/teamlogos/nfl/500/ind.png',
-            'Jacksonville Jaguars': 'https://a.espncdn.com/i/teamlogos/nfl/500/jax.png',
-            'Kansas City Chiefs': 'https://a.espncdn.com/i/teamlogos/nfl/500/kc.png',
-            'Las Vegas Raiders': 'https://a.espncdn.com/i/teamlogos/nfl/500/lv.png',
-            'Los Angeles Chargers': 'https://a.espncdn.com/i/teamlogos/nfl/500/lac.png',
-            'Los Angeles Rams': 'https://a.espncdn.com/i/teamlogos/nfl/500/lar.png',
-            'Miami Dolphins': 'https://a.espncdn.com/i/teamlogos/nfl/500/mia.png',
-            'Minnesota Vikings': 'https://a.espncdn.com/i/teamlogos/nfl/500/min.png',
-            'New England Patriots': 'https://a.espncdn.com/i/teamlogos/nfl/500/ne.png',
-            'New Orleans Saints': 'https://a.espncdn.com/i/teamlogos/nfl/500/no.png',
-            'New York Giants': 'https://a.espncdn.com/i/teamlogos/nfl/500/nyg.png',
-            'New York Jets': 'https://a.espncdn.com/i/teamlogos/nfl/500/nyj.png',
-            'Philadelphia Eagles': 'https://a.espncdn.com/i/teamlogos/nfl/500/phi.png',
-            'Pittsburgh Steelers': 'https://a.espncdn.com/i/teamlogos/nfl/500/pit.png',
-            'San Francisco 49ers': 'https://a.espncdn.com/i/teamlogos/nfl/500/sf.png',
-            'Seattle Seahawks': 'https://a.espncdn.com/i/teamlogos/nfl/500/sea.png',
-            'Tampa Bay Buccaneers': 'https://a.espncdn.com/i/teamlogos/nfl/500/tb.png',
-            'Tennessee Titans': 'https://a.espncdn.com/i/teamlogos/nfl/500/ten.png',
-            'Washington Commanders': 'https://a.espncdn.com/i/teamlogos/nfl/500/wsh.png'
-        }
-        return team_logos.get(team_name, '')
-    
     # Prepare data for display with draft status and team logos
     display_df = filtered_df.copy()
     
-    # Add draft status column at the beginning
-    display_df.insert(0, 'Draft Status', display_df['player'].apply(
-        lambda x: "✅ DRAFTED" if x in st.session_state.drafted_players else "⭕ Available"
-    ))
+    # Function to determine draft status (prioritizes Sleeper data)
+    def get_draft_status(player_name):
+        if player_name in st.session_state.sleeper_picks:
+            # Player was drafted in Sleeper
+            pick_info = st.session_state.sleeper_picks[player_name]
+            return f"✅ SLEEPER (R{pick_info['round']}, #{pick_info['pick_no']})"
+        elif player_name in st.session_state.drafted_players:
+            # Player was manually drafted in app
+            return "✅ MANUAL"
+        else:
+            return "⭕ Available"
+    
+    # Add draft status column at the beginning with enhanced status
+    display_df.insert(0, 'Draft Status', display_df['player'].apply(get_draft_status))
     
     # Add team logo column
     display_df.insert(2, 'Logo', display_df['team'].apply(get_team_logo_url))
-    
-    # Add CSS for better table styling, color coding, and frozen columns
-    st.markdown("""
-    <style>
-    /* Ensure horizontal scrolling works properly */
-    div[data-testid="stDataFrame"] {
-        overflow-x: auto !important;
-        max-width: 100% !important;
-    }
-    
-    div[data-testid="stDataFrame"] > div {
-        min-width: max-content !important;
-        white-space: nowrap !important;
-    }
-    
-    /* Style the dataframe */
-    .dataframe {
-        font-size: 12px !important;
-    }
-    
-    /* Freeze first 7 columns */
-    .dataframe thead th:nth-child(-n+7) {
-        position: sticky !important;
-        left: 0 !important;
-        z-index: 10 !important;
-        background-color: #f0f2f6 !important;
-        border-right: 2px solid #ddd !important;
-    }
-    
-    .dataframe tbody td:nth-child(-n+7) {
-        position: sticky !important;
-        left: 0 !important;
-        z-index: 5 !important;
-        background-color: inherit !important;
-        border-right: 2px solid #ddd !important;
-    }
-    
-    /* Specific positioning for each frozen column */
-    .dataframe thead th:nth-child(1), .dataframe tbody td:nth-child(1) { left: 0px !important; min-width: 120px !important; }
-    .dataframe thead th:nth-child(2), .dataframe tbody td:nth-child(2) { left: 120px !important; min-width: 180px !important; }
-    .dataframe thead th:nth-child(3), .dataframe tbody td:nth-child(3) { left: 300px !important; min-width: 140px !important; }
-    .dataframe thead th:nth-child(4), .dataframe tbody td:nth-child(4) { left: 440px !important; min-width: 60px !important; }
-    .dataframe thead th:nth-child(5), .dataframe tbody td:nth-child(5) { left: 500px !important; min-width: 80px !important; }
-    .dataframe thead th:nth-child(6), .dataframe tbody td:nth-child(6) { left: 580px !important; min-width: 80px !important; }
-    .dataframe thead th:nth-child(7), .dataframe tbody td:nth-child(7) { left: 660px !important; min-width: 90px !important; }
-    
-    /* Color coding for drafted players */
-    .dataframe tbody tr:has(td:first-child:contains("✅ DRAFTED")) {
-        background-color: #ffebee !important;
-        opacity: 0.8 !important;
-    }
-    
-    .dataframe tbody tr:has(td:first-child:contains("⭕ Available")) {
-        background-color: #e8f5e8 !important;
-    }
-    
-    /* Style draft status cells specifically */
-    .dataframe td:contains("✅ DRAFTED") {
-        background-color: #f44336 !important;
-        color: white !important;
-        font-weight: bold !important;
-    }
-    
-    .dataframe td:contains("⭕ Available") {
-        background-color: #4caf50 !important;
-        color: white !important;
-        font-weight: bold !important;
-    }
-    
-    /* Ensure frozen columns maintain background colors for drafted players */
-    .dataframe tbody tr:has(td:first-child:contains("✅ DRAFTED")) td:nth-child(-n+7) {
-        background-color: #ffebee !important;
-    }
-    
-    .dataframe tbody tr:has(td:first-child:contains("⭕ Available")) td:nth-child(-n+7) {
-        background-color: #e8f5e8 !important;
-    }
-    
-    /* Ensure scrollbars are visible */
-    div[data-testid="stDataFrame"]::-webkit-scrollbar {
-        height: 12px;
-        background-color: #f1f1f1;
-    }
-    
-    div[data-testid="stDataFrame"]::-webkit-scrollbar-thumb {
-        background-color: #888;
-        border-radius: 6px;
-    }
-    
-    div[data-testid="stDataFrame"]::-webkit-scrollbar-thumb:hover {
-        background-color: #555;
-    }
-    
-    /* Add shadow to frozen columns for better visual separation */
-    .dataframe thead th:nth-child(7), .dataframe tbody td:nth-child(7) {
-        box-shadow: 2px 0 5px rgba(0,0,0,0.1) !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
     
     # Player statistics table
     st.subheader("📊 Player Statistics")
@@ -371,8 +662,8 @@ def main():
         column_config={
             "Draft Status": st.column_config.TextColumn(
                 "Draft Status",
-                width="medium",
-                help="Shows if player is drafted (✅) or available (⭕)"
+                width="large",
+                help="Shows if player is available (⭕), drafted in Sleeper (✅ SLEEPER), or manually drafted (✅ MANUAL)"
             ),
             "Player": st.column_config.TextColumn("Player", width="large"),
             "Logo": st.column_config.ImageColumn(
@@ -400,14 +691,59 @@ def main():
     )
     
     # Show summary of drafted vs available players in current view
-    current_drafted = sum(1 for player in table_df['Player'] if player in st.session_state.drafted_players)
-    current_available = len(table_df) - current_drafted
+    current_sleeper_picks = sum(1 for player in table_df['Player'] if player in st.session_state.sleeper_picks)
+    current_manual_picks = sum(1 for player in table_df['Player'] if player in st.session_state.drafted_players and player not in st.session_state.sleeper_picks)
+    current_available = len(table_df) - current_sleeper_picks - current_manual_picks
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("📋 Drafted (in current view)", current_drafted)
+        st.metric("🛏️ Sleeper Picks", current_sleeper_picks)
     with col2:
-        st.metric("⭕ Available (in current view)", current_available)
+        st.metric("✋ Manual Picks", current_manual_picks) 
+    with col3:
+        st.metric("⭕ Available", current_available)
+    with col4:
+        if st.session_state.sleeper_league_info or st.session_state.sleeper_draft_info:
+            connection_label = "🛏️ Total Sleeper" if st.session_state.connection_type == "league" else "🛏️ Total Mock"
+            st.metric(connection_label, len(st.session_state.sleeper_picks))
+    
+    # Display Sleeper draft details if connected
+    if st.session_state.sleeper_picks:
+        st.markdown("---")
+        
+        # Dynamic header based on connection type
+        if st.session_state.connection_type == "league":
+            st.subheader("🛏️ Sleeper League Draft Details")
+        else:
+            st.subheader("🛏️ Sleeper Mock Draft Details")
+        
+        # Create a dataframe of Sleeper picks
+        sleeper_data = []
+        for player_name, pick_info in st.session_state.sleeper_picks.items():
+            sleeper_data.append({
+                'Pick #': pick_info['pick_no'],
+                'Round': pick_info['round'],
+                'Player': player_name,
+                'Position': pick_info['position'],
+                'Team': pick_info['team']
+            })
+        
+        if sleeper_data:
+            sleeper_df = pd.DataFrame(sleeper_data).sort_values('Pick #')
+            
+            st.dataframe(
+                sleeper_df,
+                use_container_width=True,
+                hide_index=True,
+                height=300,
+                column_config={
+                    "Pick #": st.column_config.NumberColumn("Pick #", width="small"),
+                    "Round": st.column_config.NumberColumn("Round", width="small"), 
+                    "Player": st.column_config.TextColumn("Player", width="large"),
+                    "Position": st.column_config.TextColumn("Position", width="small"),
+                    "Team": st.column_config.TextColumn("NFL Team", width="small")
+                }
+            )
     
     st.markdown("---")
     
@@ -425,18 +761,25 @@ def main():
                 with cols[j]:
                     player_name = row['player']
                     
-                    # Player info
+                    # Player info with enhanced status
                     st.markdown(f"**{player_name}**")
                     st.text(f"{row['team']} - {row['position']}")
                     st.text(f"Rank: {format_stat(row.get('overallRank'))}")
                     
-                    # Draft button
-                    if player_name in st.session_state.drafted_players:
-                        if st.button(f"✅ Drafted", key=f"individual_undraft_{idx}", type="secondary", use_container_width=True):
+                    # Check different draft statuses
+                    if player_name in st.session_state.sleeper_picks:
+                        # Player drafted in Sleeper - show info but disable button
+                        pick_info = st.session_state.sleeper_picks[player_name]
+                        st.button(f"🛏️ Sleeper Pick", key=f"sleeper_pick_{idx}", disabled=True, use_container_width=True)
+                        st.markdown(f"*R{pick_info['round']}, #{pick_info['pick_no']}*")
+                    elif player_name in st.session_state.drafted_players:
+                        # Player manually drafted - allow undrafting
+                        if st.button(f"✅ Manually Drafted", key=f"individual_undraft_{idx}", type="secondary", use_container_width=True):
                             st.session_state.drafted_players.discard(player_name)
                             st.rerun()
-                        st.markdown("*Player is drafted*")
+                        st.markdown("*Manual pick*")
                     else:
+                        # Player available - allow drafting
                         if st.button(f"⭕ Draft Player", key=f"individual_draft_{idx}", type="primary", use_container_width=True):
                             st.session_state.drafted_players.add(player_name)
                             st.rerun()
