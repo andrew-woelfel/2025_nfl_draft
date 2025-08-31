@@ -219,14 +219,12 @@ def perform_sync(connection_type, league_id=None, draft_id=None):
         st.session_state.sync_in_progress = True
         
         if connection_type == "league" and league_id:
-            # Clear cache and fetch league data
-            get_sleeper_draft_picks.clear()
-            get_sleeper_league_info.clear()
+            # Clear cache and fetch league data - ensure cache is actually cleared
+            st.cache_data.clear()  # Clear all cached data
             sleeper_picks = get_sleeper_draft_picks(league_id)
         elif connection_type == "mock" and draft_id:
-            # Clear cache and fetch mock draft data
-            get_sleeper_draft_picks_by_id.clear()
-            get_sleeper_draft_info.clear()
+            # Clear cache and fetch mock draft data - ensure cache is actually cleared
+            st.cache_data.clear()  # Clear all cached data
             sleeper_picks = get_sleeper_draft_picks_by_id(draft_id)
         else:
             return False, "Invalid sync parameters"
@@ -244,7 +242,8 @@ def perform_sync(connection_type, league_id=None, draft_id=None):
         st.session_state.last_sync_time = time.time()
         
         new_count = len(sleeper_picks)
-        return True, f"Synced {new_count} picks" + (f" (+{new_count - old_count} new)" if new_count > old_count else "")
+        change_indicator = f" (+{new_count - old_count} new)" if new_count > old_count else f" ({new_count - old_count})" if new_count < old_count else ""
+        return True, f"Synced {new_count} picks{change_indicator}"
         
     except Exception as e:
         return False, f"Sync error: {str(e)}"
@@ -355,9 +354,8 @@ def main():
                 if st.session_state.current_league_id:
                     with st.sidebar:
                         with st.spinner("Syncing..."):
-                            # Clear cache to force fresh data fetch
-                            get_sleeper_draft_picks.clear()
-                            get_sleeper_league_info.clear()
+                            # Clear all cache to force fresh data fetch
+                            st.cache_data.clear()
                             
                             sleeper_picks = get_sleeper_draft_picks(st.session_state.current_league_id)
                             st.session_state.sleeper_picks = sleeper_picks
@@ -400,9 +398,8 @@ def main():
                 if st.session_state.current_draft_id:
                     with st.sidebar:
                         with st.spinner("Syncing..."):
-                            # Clear cache to force fresh data fetch
-                            get_sleeper_draft_picks_by_id.clear()
-                            get_sleeper_draft_info.clear()
+                            # Clear all cache to force fresh data fetch
+                            st.cache_data.clear()
                             
                             sleeper_picks = get_sleeper_draft_picks_by_id(st.session_state.current_draft_id)
                             st.session_state.sleeper_picks = sleeper_picks
@@ -436,12 +433,17 @@ def main():
     
     st.sidebar.markdown("---")
     
-    # Auto-sync functionality with proper timing control
+    # Auto-sync functionality with improved timing control
     if st.session_state.auto_sync_active and (st.session_state.current_league_id or st.session_state.current_draft_id):
         current_time = time.time()
+        
+        # Initialize last sync time if not set
+        if st.session_state.last_sync_time == 0:
+            st.session_state.last_sync_time = current_time
+        
         time_since_last_sync = current_time - st.session_state.last_sync_time
         
-        # Only sync if 5 seconds have passed since last sync and no sync is in progress
+        # Only sync if 5 seconds have passed and no sync is in progress
         if time_since_last_sync >= 5.0 and not st.session_state.sync_in_progress:
             # Create a placeholder for sync status
             with st.sidebar:
@@ -455,34 +457,45 @@ def main():
                 st.session_state.current_draft_id
             )
             
+            # Show result
             if success:
                 sync_placeholder.success(f"✅ {message}")
-                time.sleep(1)  # Show success message briefly
             else:
                 sync_placeholder.error(f"❌ {message}")
-                time.sleep(2)  # Show error message longer
             
-            # Clear the message and trigger refresh
+            # Brief pause to show message, then refresh
+            time.sleep(1)
             sync_placeholder.empty()
-            st.rerun()
-        else:
-            # Show countdown to next sync
-            time_until_next = 5.0 - time_since_last_sync
-            if time_until_next > 0:
-                st.sidebar.caption(f"Next sync in: {time_until_next:.1f}s")
+        
+        # Always rerun to maintain the auto-sync loop
+        time.sleep(0.5)  # Small delay to prevent too rapid refreshes
+        st.rerun()
     
     # Show auto-sync status if active
     if st.session_state.auto_sync_active:
-        st.sidebar.info("🔄 Auto-syncing every 5 seconds...")
+        st.sidebar.info("🔄 Auto-sync active")
+        
         if st.session_state.last_sync_time > 0:
+            current_time = time.time()
+            time_since_last = current_time - st.session_state.last_sync_time
+            
+            if time_since_last < 5.0:
+                time_until_next = 5.0 - time_since_last
+                st.sidebar.caption(f"Next sync in: {time_until_next:.1f}s")
+            else:
+                st.sidebar.caption("Ready to sync...")
+            
             last_sync_formatted = time.strftime('%H:%M:%S', time.localtime(st.session_state.last_sync_time))
             st.sidebar.caption(f"Last sync: {last_sync_formatted}")
         
-        # Show sync status
+        # Show sync status with cache clearing indicator
         if st.session_state.sync_in_progress:
-            st.sidebar.warning("⏳ Sync in progress...")
+            st.sidebar.warning("⏳ Sync in progress... (Cache cleared)")
         else:
-            st.sidebar.success("✅ Ready for next sync")
+            st.sidebar.success("✅ Sync ready")
+            
+        # Add cache status indicator
+        st.sidebar.caption("🗂️ Cache cleared on each sync")
     
     # File upload section
     uploaded_file = st.file_uploader(
@@ -512,33 +525,45 @@ def main():
     
     st.markdown("---")
     
-    # Sidebar filters
-    st.sidebar.header("🔍 Filters")
+    # Filters section in main content area
+    st.header("🔍 Filters & Sorting")
     
-    # Position filter
-    positions = ['All'] + sorted([pos for pos in df['position'].unique() if pd.notna(pos)])
-    selected_position = st.sidebar.selectbox("Position", positions)
+    # Create columns for filters
+    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
     
-    # Team filter
-    teams = ['All'] + sorted([team for team in df['team'].unique() if pd.notna(team)])
-    selected_team = st.sidebar.selectbox("Team", teams)
+    with filter_col1:
+        # Position filter
+        positions = ['All'] + sorted([pos for pos in df['position'].unique() if pd.notna(pos)])
+        selected_position = st.selectbox("Position", positions)
     
-    # Drafted status filter
-    drafted_filter = st.sidebar.radio("Show", ["All Players", "Available Only", "Drafted Only"])
+    with filter_col2:
+        # Team filter
+        teams = ['All'] + sorted([team for team in df['team'].unique() if pd.notna(team)])
+        selected_team = st.selectbox("Team", teams)
     
-    # Search box
-    search_term = st.sidebar.text_input("Search Player", placeholder="Enter player name...")
+    with filter_col3:
+        # Drafted status filter
+        drafted_filter = st.radio("Show", ["All Players", "Available Only", "Drafted Only"])
     
-    # Sort options
-    st.sidebar.header("📊 Sorting")
-    sort_options = {
-        'Overall Rank': 'overallRank',
-        'Fantasy Points': 'fantasy',
-        'Position Rank': 'positionRank',
-        'Player Name': 'player'
-    }
-    sort_by = st.sidebar.selectbox("Sort by", list(sort_options.keys()))
-    ascending = st.sidebar.checkbox("Ascending order", value=True)
+    with filter_col4:
+        # Search box
+        search_term = st.text_input("Search Player", placeholder="Enter player name...")
+    
+    # Sorting section
+    st.subheader("📊 Sorting Options")
+    sort_col1, sort_col2 = st.columns(2)
+    
+    with sort_col1:
+        sort_options = {
+            'Overall Rank': 'overallRank',
+            'Fantasy Points': 'fantasy',
+            'Position Rank': 'positionRank',
+            'Player Name': 'player'
+        }
+        sort_by = st.selectbox("Sort by", list(sort_options.keys()))
+    
+    with sort_col2:
+        ascending = st.checkbox("Ascending order", value=True)
     
     # Apply filters
     filtered_df = df.copy()
