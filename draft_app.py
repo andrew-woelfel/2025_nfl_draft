@@ -33,6 +33,90 @@ if 'last_sync_time' not in st.session_state:
     st.session_state.last_sync_time = 0
 if 'sync_in_progress' not in st.session_state:
     st.session_state.sync_in_progress = False
+if 'url_params_processed' not in st.session_state:
+    st.session_state.url_params_processed = False
+
+def get_url_params():
+    """Extract URL parameters from the current page"""
+    try:
+        # Get URL parameters using st.query_params (Streamlit 1.28+)
+        return st.query_params
+    except AttributeError:
+        # Fallback for older Streamlit versions
+        return {}
+
+def set_url_params(**params):
+    """Set URL parameters"""
+    try:
+        # Set URL parameters using st.query_params (Streamlit 1.28+)
+        for key, value in params.items():
+            if value:
+                st.query_params[key] = value
+            elif key in st.query_params:
+                del st.query_params[key]
+    except AttributeError:
+        # Fallback for older Streamlit versions - just pass
+        pass
+
+def process_url_params():
+    """Process URL parameters and auto-connect if league_id or draft_id is provided"""
+    if st.session_state.url_params_processed:
+        return
+    
+    params = get_url_params()
+    
+    # Check for league_id parameter
+    if 'league_id' in params:
+        league_id = params['league_id']
+        if league_id and league_id != st.session_state.current_league_id:
+            with st.spinner("Auto-connecting to Sleeper League from URL..."):
+                st.session_state.current_league_id = league_id
+                st.session_state.current_draft_id = None
+                
+                # Fetch league info
+                league_info = get_sleeper_league_info(league_id)
+                if league_info:
+                    st.session_state.sleeper_league_info = league_info
+                    st.session_state.sleeper_draft_info = None
+                    st.session_state.connection_type = "league"
+                    
+                    # Fetch drafted players
+                    sleeper_picks = get_sleeper_draft_picks(league_id)
+                    st.session_state.sleeper_picks = sleeper_picks
+                    st.session_state.drafted_players.update(sleeper_picks.keys())
+                    
+                    st.success(f"Auto-connected to: {league_info.get('name', 'Unknown League')}")
+                    st.success(f"Loaded {len(sleeper_picks)} drafted players")
+                else:
+                    st.error(f"Could not connect to league ID: {league_id}")
+    
+    # Check for draft_id parameter
+    elif 'draft_id' in params:
+        draft_id = params['draft_id']
+        if draft_id and draft_id != st.session_state.current_draft_id:
+            with st.spinner("Auto-connecting to Mock Draft from URL..."):
+                st.session_state.current_draft_id = draft_id
+                st.session_state.current_league_id = None
+                
+                # Fetch draft info
+                draft_info = get_sleeper_draft_info(draft_id)
+                if draft_info:
+                    st.session_state.sleeper_draft_info = draft_info
+                    st.session_state.sleeper_league_info = None
+                    st.session_state.connection_type = "mock"
+                    
+                    # Fetch drafted players
+                    sleeper_picks = get_sleeper_draft_picks_by_id(draft_id)
+                    st.session_state.sleeper_picks = sleeper_picks
+                    st.session_state.drafted_players.update(sleeper_picks.keys())
+                    
+                    draft_type = draft_info.get('type', 'unknown')
+                    st.success(f"Auto-connected to: {draft_type.title()} Draft")
+                    st.success(f"Loaded {len(sleeper_picks)} drafted players")
+                else:
+                    st.error(f"Could not connect to draft ID: {draft_id}")
+    
+    st.session_state.url_params_processed = True
 
 @st.cache_data
 def get_sleeper_draft_info(draft_id):
@@ -251,10 +335,22 @@ def perform_sync(connection_type, league_id=None, draft_id=None):
         st.session_state.sync_in_progress = False
 
 def main():
+    # Process URL parameters first
+    process_url_params()
+    
     st.title("🏈 NFL Fantasy Football Draft Board")
     
     # Sleeper API Integration Section
     st.sidebar.header("🛏️ Sleeper Integration")
+    
+    # Show current URL parameters info
+    params = get_url_params()
+    if params:
+        st.sidebar.info("📎 URL Parameters detected")
+        if 'league_id' in params:
+            st.sidebar.caption(f"League ID: {params['league_id']}")
+        if 'draft_id' in params:
+            st.sidebar.caption(f"Draft ID: {params['draft_id']}")
     
     # Choose connection type
     connection_type = st.sidebar.radio(
@@ -264,9 +360,11 @@ def main():
     )
     
     if connection_type == "League Draft":
-        # Input for Sleeper League ID
+        # Input for Sleeper League ID (pre-populated from URL if available)
+        default_league_id = params.get('league_id', st.session_state.current_league_id or '')
         sleeper_league_id = st.sidebar.text_input(
             "Sleeper League ID",
+            value=default_league_id,
             placeholder="Enter your Sleeper league ID",
             help="Find your league ID in your Sleeper league URL: sleeper.app/leagues/{league_id}/team"
         )
@@ -276,9 +374,10 @@ def main():
             if sleeper_league_id:
                 with st.sidebar:
                     with st.spinner("Connecting to Sleeper League..."):
-                        # Store the league ID for syncing
+                        # Store the league ID for syncing and update URL
                         st.session_state.current_league_id = sleeper_league_id
                         st.session_state.current_draft_id = None  # Clear draft ID
+                        set_url_params(league_id=sleeper_league_id, draft_id=None)
                         
                         # Fetch league info
                         league_info = get_sleeper_league_info(sleeper_league_id)
@@ -302,9 +401,11 @@ def main():
                 st.sidebar.error("Please enter a league ID")
     
     else:  # Mock Draft (Direct ID)
-        # Input for Draft ID
+        # Input for Draft ID (pre-populated from URL if available)
+        default_draft_id = params.get('draft_id', st.session_state.current_draft_id or '')
         sleeper_draft_id = st.sidebar.text_input(
             "Sleeper Draft ID", 
+            value=default_draft_id,
             placeholder="Enter your mock draft ID",
             help="Find your draft ID in the Sleeper mock draft URL: sleeper.app/draft/nfl/{draft_id}"
         )
@@ -314,9 +415,10 @@ def main():
             if sleeper_draft_id:
                 with st.sidebar:
                     with st.spinner("Connecting to Mock Draft..."):
-                        # Store the draft ID for syncing
+                        # Store the draft ID for syncing and update URL
                         st.session_state.current_draft_id = sleeper_draft_id
                         st.session_state.current_league_id = None  # Clear league ID
+                        set_url_params(draft_id=sleeper_draft_id, league_id=None)
                         
                         # Fetch draft info
                         draft_info = get_sleeper_draft_info(sleeper_draft_id)
@@ -344,6 +446,20 @@ def main():
     # Display connection status
     if st.session_state.sleeper_league_info or st.session_state.sleeper_draft_info:
         st.sidebar.success("✅ Connected to Sleeper")
+        
+        # Share URL section
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📎 Share URL")
+        
+        current_url = st.get_option("browser.serverAddress") or "localhost:8501"
+        if st.session_state.connection_type == "league" and st.session_state.current_league_id:
+            share_url = f"http://{current_url}?league_id={st.session_state.current_league_id}"
+            st.sidebar.code(share_url, language=None)
+            st.sidebar.caption("Share this URL to let others view your league draft")
+        elif st.session_state.connection_type == "mock" and st.session_state.current_draft_id:
+            share_url = f"http://{current_url}?draft_id={st.session_state.current_draft_id}"
+            st.sidebar.code(share_url, language=None)
+            st.sidebar.caption("Share this URL to let others view your mock draft")
         
         if st.session_state.connection_type == "league" and st.session_state.sleeper_league_info:
             st.sidebar.info(f"League: {st.session_state.sleeper_league_info.get('name')}")
