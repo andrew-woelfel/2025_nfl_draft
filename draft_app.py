@@ -215,6 +215,53 @@ def get_sleeper_users(league_id):
         return {}
 
 @st.cache_data
+def get_sleeper_rankings():
+    """Fetch Sleeper's player rankings"""
+    try:
+        # Get current NFL players data which includes Sleeper's rankings
+        response = requests.get("https://api.sleeper.app/v1/players/nfl")
+        if response.status_code == 200:
+            players_data = response.json()
+            
+            # Create a mapping of player names to their Sleeper rankings
+            sleeper_rankings = {}
+            
+            for player_id, player_info in players_data.items():
+                if player_info.get('active') and player_info.get('fantasy_positions'):
+                    first_name = player_info.get('first_name', '').strip()
+                    last_name = player_info.get('last_name', '').strip()
+                    full_name = f"{first_name} {last_name}".strip()
+                    
+                    # Also try common name variations
+                    search_full_name = player_info.get('search_full_name', '').strip()
+                    
+                    if full_name:
+                        sleeper_data = {
+                            'sleeper_rank': player_info.get('search_rank'),
+                            'sleeper_position': player_info.get('position'),
+                            'sleeper_team': player_info.get('team'),
+                            'sleeper_age': player_info.get('age'),
+                            'sleeper_years_exp': player_info.get('years_exp'),
+                            'sleeper_id': player_id
+                        }
+                        
+                        # Store under multiple name variations
+                        sleeper_rankings[full_name] = sleeper_data
+                        if search_full_name and search_full_name != full_name:
+                            sleeper_rankings[search_full_name] = sleeper_data
+                        
+                        # Try without middle names/suffixes
+                        simple_name = f"{first_name} {last_name}".strip()
+                        if simple_name != full_name:
+                            sleeper_rankings[simple_name] = sleeper_data
+            
+            return sleeper_rankings
+        return {}
+    except Exception as e:
+        st.error(f"Error fetching Sleeper rankings: {e}")
+        return {}
+
+@st.cache_data
 def load_data(uploaded_file=None):
     """Load and preprocess the NFL projections data"""
     try:
@@ -240,6 +287,100 @@ def load_data(uploaded_file=None):
         
         # Add drafted status column
         df['drafted'] = df['player'].isin(st.session_state.drafted_players)
+        
+        # Add Sleeper rankings data
+        sleeper_rankings = get_sleeper_rankings()
+        
+        # Debug: Show some info about the data matching
+        if sleeper_rankings:
+            st.sidebar.info(f"📊 Loaded {len(sleeper_rankings)} Sleeper player records")
+        else:
+            st.sidebar.warning("⚠️ No Sleeper rankings data loaded")
+        
+        def normalize_name(name):
+            """Normalize player names for better matching"""
+            if not name:
+                return ""
+            # Remove common suffixes and normalize spacing
+            name = str(name).strip()
+            name = name.replace(" Jr.", "").replace(" Sr.", "").replace(" III", "").replace(" II", "")
+            name = " ".join(name.split())  # Normalize whitespace
+            return name
+        
+        def get_sleeper_rank(player_name):
+            # Try exact match first
+            if player_name in sleeper_rankings:
+                rank = sleeper_rankings[player_name]['sleeper_rank']
+                return rank if rank is not None else 9999
+            
+            # Try normalized name
+            normalized = normalize_name(player_name)
+            if normalized in sleeper_rankings:
+                rank = sleeper_rankings[normalized]['sleeper_rank']
+                return rank if rank is not None else 9999
+            
+            # Try searching through all Sleeper names
+            for sleeper_name in sleeper_rankings.keys():
+                if normalize_name(sleeper_name) == normalized:
+                    rank = sleeper_rankings[sleeper_name]['sleeper_rank']
+                    return rank if rank is not None else 9999
+            
+            return 9999
+        
+        def get_sleeper_age(player_name):
+            # Try exact match first
+            if player_name in sleeper_rankings:
+                return sleeper_rankings[player_name]['sleeper_age']
+            
+            # Try normalized name
+            normalized = normalize_name(player_name)
+            if normalized in sleeper_rankings:
+                return sleeper_rankings[normalized]['sleeper_age']
+            
+            # Try searching through all Sleeper names
+            for sleeper_name in sleeper_rankings.keys():
+                if normalize_name(sleeper_name) == normalized:
+                    return sleeper_rankings[sleeper_name]['sleeper_age']
+            
+            return None
+            
+        def get_sleeper_years_exp(player_name):
+            # Try exact match first
+            if player_name in sleeper_rankings:
+                return sleeper_rankings[player_name]['sleeper_years_exp']
+            
+            # Try normalized name
+            normalized = normalize_name(player_name)
+            if normalized in sleeper_rankings:
+                return sleeper_rankings[normalized]['sleeper_years_exp']
+            
+            # Try searching through all Sleeper names
+            for sleeper_name in sleeper_rankings.keys():
+                if normalize_name(sleeper_name) == normalized:
+                    return sleeper_rankings[sleeper_name]['sleeper_years_exp']
+            
+            return None
+        
+        df['sleeper_rank'] = df['player'].apply(get_sleeper_rank)
+        df['sleeper_age'] = df['player'].apply(get_sleeper_age)
+        df['sleeper_years_exp'] = df['player'].apply(get_sleeper_years_exp)
+        
+        # Debug: Show matching statistics
+        matched_players = len(df[df['sleeper_rank'] != 9999])
+        total_players = len(df)
+        if total_players > 0:
+            match_rate = (matched_players / total_players) * 100
+            st.sidebar.info(f"🎯 Matched {matched_players}/{total_players} players ({match_rate:.1f}%)")
+            
+            if matched_players < total_players * 0.5:  # Less than 50% match rate
+                st.sidebar.warning("⚠️ Low match rate - check player name formats")
+                
+                # Show some unmatched examples
+                unmatched = df[df['sleeper_rank'] == 9999]['player'].head(5).tolist()
+                if unmatched:
+                    st.sidebar.text("Unmatched examples:")
+                    for name in unmatched:
+                        st.sidebar.text(f"  • {name}")
         
         return df
     except FileNotFoundError:
@@ -674,6 +815,7 @@ def main():
             'Overall Rank': 'overallRank',
             'Fantasy Points': 'fantasy',
             'Position Rank': 'positionRank',
+            'Sleeper Rank': 'sleeper_rank',
             'Player Name': 'player'
         }
         sort_by = st.selectbox("Sort by", list(sort_options.keys()))
@@ -749,7 +891,8 @@ def main():
     
     # Reorder and select columns for display (including logo and draft status)
     columns_to_show = [
-        'Draft Status', 'player', 'Logo', 'team', 'position', 'overallRank', 'positionRank', 'fantasy',
+        'Draft Status', 'player', 'Logo', 'team', 'position', 'overallRank', 'positionRank', 
+        'sleeper_rank', 'sleeper_age', 'sleeper_years_exp', 'fantasy',
         'completionsAttempts', 'passingYards', 'passingTouchdowns', 'interceptionsThrown',
         'rushingAttempts', 'rushingYards', 'rushingTouchdowns',
         'receptions', 'targets', 'receivingYards', 'receivingTouchdowns',
@@ -768,7 +911,10 @@ def main():
         'team': 'Team',
         'position': 'Pos',
         'overallRank': 'Overall',
-        'positionRank': 'Pos Rank', 
+        'positionRank': 'Pos Rank',
+        'sleeper_rank': 'Sleeper Rank',
+        'sleeper_age': 'Age',
+        'sleeper_years_exp': 'Exp',
         'fantasy': 'Fantasy',
         'completionsAttempts': 'Comp/Att',
         'passingYards': 'Pass Yds',
